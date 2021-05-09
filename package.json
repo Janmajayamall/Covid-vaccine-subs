@@ -1,16 +1,19 @@
 {
-  "name": "subscribe-vaccine-availibility",
-  "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
-  },
-  "author": "",
-  "license": "ISC",
-  "dependencies": {
-    "axios": "^0.21.1",
-    "mongodb": "^3.6.6",
-    "venom-bot": "^3.0.16"
-  }
+	"name": "subscribe-vaccine-availibility",
+	"version": "1.0.0",
+	"description": "",
+	"main": "index.js",
+	"scripts": {
+		"test": "echo \"Error: no test specified\" && exit 1",
+		"start:dev": "node -r dotenv/config index.js dotenv_config_path=./.development.env",
+		"start:prod": "node -r dotenv/config index.js dotenv_config_path=./.production.env"
+	},
+	"author": "",
+	"license": "ISC",
+	"dependencies": {
+		"axios": "^0.21.1",
+		"dotenv": "^9.0.1",
+		"mongodb": "^3.6.6",
+		"venom-bot": "^3.0.16"
+	}
 }
