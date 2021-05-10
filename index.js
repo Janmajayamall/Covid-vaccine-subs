@@ -108,7 +108,7 @@ async function connectToMongoDB() {
 
 async function getDistinctPincodes(collection) {
 	try {
-		const res = collection.distinct("pincode");
+		const res = await collection.distinct("pincode");
 		return res;
 	} catch (e) {
 		printError(`ERROR IN FETCHING DISTINCT PINCODES`);
@@ -131,6 +131,16 @@ async function getSubsOfPincodeByAgeGroup(collection, ageGroup, pincode) {
 			`ERROR IN FETCHING SUBSCRIBERS LIST FOR AGE GROUP - ${ageGroup} FOR PINCODE - ${pincode}`
 		);
 		return undefined;
+	}
+}
+
+async function getPhoneNumbersCount(collection) {
+	try {
+		const res = await collection.distinct("phoneNumber");
+		return res.length;
+	} catch (e) {
+		printError(`ERROR IN FETCHING DISTINCT PHONE NUMBERS`);
+		return 0;
 	}
 }
 
@@ -174,6 +184,14 @@ async function initiateService(venomClient) {
 
 	// get distinct pincodes
 	const allPincodes = await getDistinctPincodes(entriesCollection);
+
+	// get distinct phoneNumbers count
+	const phoneNumbersCount = await getPhoneNumbersCount(entriesCollection);
+	if (showLogs) {
+		printLine();
+		console.log(`DISTINCT PHONE NUMBERS COUNT IS ${phoneNumbersCount}`);
+		printLine();
+	}
 
 	// get date
 	const date = generateDate();
