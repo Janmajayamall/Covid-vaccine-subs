@@ -4,6 +4,9 @@ const { MongoClient } = require("mongodb");
 
 const showLogs = true;
 
+// set to false to send whatsapp messages
+const debug = false;
+
 // GOVERNMENT API FUNCTIONS
 function generateMessageForAgeGroup(centersInfo, ageGroup, pincode) {
 	const centers = centersInfo
@@ -11,19 +14,23 @@ function generateMessageForAgeGroup(centersInfo, ageGroup, pincode) {
 			let avlSessions = center.sessions.filter((session) => {
 				return (
 					session.available_capacity !== 0 &&
-					session.min_age_limit == ageGroup
+					session.min_age_limit === ageGroup
 				);
 			});
-			return avlSessions.length !== 0
-				? {
-						...center,
-						sessions: avlSessions,
-				  }
-				: undefined;
+			return {
+				...center,
+				sessions: avlSessions,
+			};
 		})
 		.filter((center) => {
-			return center != undefined;
+			return center.sessions.length !== 0;
 		});
+
+	if (showLogs) {
+		console.log(
+			`TEXT MESSAGE FOR AGE GROUP - ${ageGroup} FOR PINCODE - ${pincode} GENERATED SUCCESSFULLY\n`
+		);
+	}
 
 	if (centers.length === 0) {
 		return "";
@@ -68,7 +75,13 @@ async function getVaccineInfoByPincode(pincode, date) {
 					"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.93 Safari/537.36",
 			},
 		});
-		// console.log(JSON.stringify(res.data.centers, null, 2));
+
+		if (showLogs) {
+			console.log(
+				`FETCHED VACCINE DATA FROM GOVERNMENT API FOR ${pincode} FOR DATE ${date}\n`
+			);
+		}
+
 		return res.data.centers;
 	} catch (e) {
 		if (showLogs) {
@@ -124,6 +137,10 @@ async function getSubsOfPincodeByAgeGroup(collection, ageGroup, pincode) {
 				ageGroups: `${ageGroup}+`,
 			})
 			.toArray();
+
+		console.log(
+			`FETCHED SUBSCRIBERS LIST FOR AGE GROUP - ${ageGroup} FOR PINCODE - ${pincode}. ${res.length} SUBSCRIBERS\n`
+		);
 
 		return res;
 	} catch (e) {
@@ -217,17 +234,10 @@ async function initiateService(venomClient) {
 		}
 
 		// get vaccine info from gov API according to pincode
-		const centersInfo = await getVaccineInfoByPincode(
-			pincode,
-			"08-05-2021"
-		);
+		const centersInfo = await getVaccineInfoByPincode(pincode, date);
+
 		if (centersInfo == undefined) {
 			continue;
-		}
-		if (showLogs) {
-			console.log(
-				`FETCHED VACCINE DATA FROM GOVERNMENT API FOR ${pincode} FOR DATE ${date}\n`
-			);
 		}
 
 		// send notifications to subs by age group
@@ -249,12 +259,6 @@ async function initiateService(venomClient) {
 				pincode
 			);
 
-			if (showLogs) {
-				console.log(
-					`TEXT MESSAGE FOR AGE GROUP - ${ageGroup} FOR PINCODE - ${pincode} GENERATED SUCCESSFULLY\n`
-				);
-			}
-
 			if (textMessage.length !== 0) {
 				if (showLogs) {
 					console.log(
@@ -273,9 +277,6 @@ async function initiateService(venomClient) {
 				}
 
 				if (showLogs) {
-					console.log(
-						`FETCHED SUBSCRIBERS LIST FOR AGE GROUP - ${ageGroup} FOR PINCODE - ${pincode}. ${subscribers.length} SUBSCRIBERS\n`
-					);
 					printDoubleSpace();
 					console.log(
 						`INITIATING SENDING WHATSAPP MESSAGE TO SUBSCRIBERS FOR AGE GROUP - ${ageGroup} FOR PINCODE - ${pincode}\n`
@@ -285,21 +286,30 @@ async function initiateService(venomClient) {
 				// send text to each subscriber
 				for (let z = 0; z < subscribers.length; z++) {
 					const sub = subscribers[z];
-					try {
-						await venomClient.sendText(
-							`91${sub.phoneNumber}@c.us`,
-							textMessage
-						);
 
-						// sleep for 0.5 seconds
-						await sleep(500);
-					} catch (e) {
+					if (debug === false) {
+						try {
+							await venomClient.sendText(
+								`91${sub.phoneNumber}@c.us`,
+								textMessage
+							);
+						} catch (e) {
+							if (showLogs) {
+								printError(
+									`SENDING WHATSAPP MESSAGE TO ${sub.phoneNumber} FAILED WITH ERROR - ${e.text} FOR AGE GROUP - ${ageGroup} FOR PINCODE - ${pincode}\n`
+								);
+							}
+						}
+					} else {
 						if (showLogs) {
-							printError(
-								`SENDING WHATSAPP MESSAGE TO ${sub.phoneNumber} FAILED WITH ERROR - ${e.text} FOR AGE GROUP - ${ageGroup} FOR PINCODE - ${pincode}\n`
+							console.log(
+								`DEBUG: SENT FAKE WHATSAPP MESSAGE TO ${sub.phoneNumber} FOR AGE GROUP - ${ageGroup} FOR PINCODE - ${pincode}\n`
 							);
 						}
 					}
+
+					// sleep for 0.5 seconds
+					await sleep(500);
 				}
 
 				if (showLogs) {
@@ -354,6 +364,9 @@ venom
 		if (showLogs) {
 			printLine();
 			console.log(`INITIATING MAIN SERVICE\n`);
+			if (debug === true) {
+				console.log(`RUNNING IN DEBUG MODE`);
+			}
 			printLine();
 			printDoubleSpace();
 		}
