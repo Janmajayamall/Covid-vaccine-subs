@@ -7,13 +7,16 @@ const showLogs = true;
 // set to false to send whatsapp messages
 const debug = false;
 
+// send notifications to subs by age group 18 | 45
+const ageGroups = [18];
+
 // GOVERNMENT API FUNCTIONS
 function generateMessageForAgeGroup(centersInfo, ageGroup, pincode) {
 	const centers = centersInfo
 		.map((center) => {
 			let avlSessions = center.sessions.filter((session) => {
 				return (
-					session.available_capacity !== 0 &&
+					session.available_capacity >= 1 &&
 					session.min_age_limit === ageGroup
 				);
 			});
@@ -58,8 +61,7 @@ function generateMessageForAgeGroup(centersInfo, ageGroup, pincode) {
 async function getVaccineInfoByPincode(pincode, date) {
 	try {
 		const res = await axios({
-			url:
-				"https://cdn-api.co-vin.in/api/v2/appointment/sessions/public/calendarByPin",
+			url: "https://cdn-api.co-vin.in/api/v2/appointment/sessions/public/calendarByPin",
 			method: "get",
 			params: {
 				pincode: pincode,
@@ -76,17 +78,23 @@ async function getVaccineInfoByPincode(pincode, date) {
 			},
 		});
 
+		const centers = res.data.centers;
+
+		if (Array.isArray(centers) === false) {
+			throw new Error("Centers array not returned from GOV. API");
+		}
+
 		if (showLogs) {
 			console.log(
-				`FETCHED VACCINE DATA FROM GOVERNMENT API FOR ${pincode} FOR DATE ${date}\n`
+				`FETCHED VACCINE DATA FROM GOVERNMENT API FOR ${pincode} FOR DATE ${date} FOR CENTERS ${centers.length}\n`
 			);
 		}
 
-		return res.data.centers;
+		return centers;
 	} catch (e) {
 		if (showLogs) {
 			printError(
-				`ERROR IN FETCHING DATA FROM GOV API FOR PINCODE ${pincode} FOR DATE ${date} WITH ERROR - ${e.response.data.error}`
+				`ERROR IN FETCHING DATA FROM GOV API FOR PINCODE ${pincode} FOR DATE ${date} WITH ERROR - ${e}`
 			);
 		}
 		return undefined;
@@ -135,6 +143,7 @@ async function getSubsOfPincodeByAgeGroup(collection, ageGroup, pincode) {
 			.find({
 				pincode: pincode,
 				ageGroups: `${ageGroup}+`,
+				status: "ACTIVE",
 			})
 			.toArray();
 
@@ -240,8 +249,6 @@ async function initiateService(venomClient) {
 			continue;
 		}
 
-		// send notifications to subs by age group
-		const ageGroups = [18, 45];
 		for (let j = 0; j < ageGroups.length; j++) {
 			const ageGroup = ageGroups[j];
 
@@ -259,21 +266,21 @@ async function initiateService(venomClient) {
 				pincode
 			);
 
+			// get subscribers for the pincode according to age group
+			const subscribers = await getSubsOfPincodeByAgeGroup(
+				entriesCollection,
+				ageGroup,
+				pincode
+			);
+			if (subscribers == undefined) {
+				continue;
+			}
+
 			if (textMessage.length !== 0) {
 				if (showLogs) {
 					console.log(
 						`VACCINE AVAILABLE FOR AGE GROUP - ${ageGroup} FOR PINCODE - ${pincode}. TEXT MESSAGES WILL BE SENT\n`
 					);
-				}
-
-				// get subscribers for the pincode according to age group
-				const subscribers = await getSubsOfPincodeByAgeGroup(
-					entriesCollection,
-					ageGroup,
-					pincode
-				);
-				if (subscribers == undefined) {
-					continue;
 				}
 
 				if (showLogs) {
@@ -357,13 +364,15 @@ async function initiateService(venomClient) {
 	return;
 }
 
-// STARTING VENOM
-venom
-	.create()
-	.then(async (client) => {
+async function main(venomClient) {
+	let runningCount = 0;
+
+	while (true) {
 		if (showLogs) {
 			printLine();
-			console.log(`INITIATING MAIN SERVICE\n`);
+			console.log(
+				`INITIATING MAIN SERVICE FOR AGE GROUPS ${ageGroups}\n`
+			);
 			if (debug === true) {
 				console.log(`RUNNING IN DEBUG MODE`);
 			}
@@ -372,15 +381,34 @@ venom
 		}
 
 		// initiate the process
-		await initiateService(client);
+		await initiateService(venomClient);
+
+		runningCount = runningCount + 1;
 
 		if (showLogs) {
 			printDoubleSpace();
 			printLine();
-			console.log(`COMPLETED MAIN SERVICE\n`);
+			console.log(
+				`COMPLETED MAIN SERVICE FOR AGE GROUPS ${ageGroups} - ${runningCount} TIMES \n`
+			);
 			printLine();
 		}
+
+		// sleep for 20 mins
+		await sleep(1200000);
+	}
+
+	return;
+}
+
+// STARTING VENOM
+venom
+	.create()
+	.then(async (client) => {
+		await main(client);
 	})
 	.catch((error) => {
 		console.log(error);
 	});
+
+// https://cdn-api.co-vin.in/api/v2/appointment/sessions/public/calendarByPin

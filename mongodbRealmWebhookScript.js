@@ -8,6 +8,7 @@ exports = async function (payload, response) {
 	answersObj["phoneNumber"] = answers.phoneNumber;
 	answersObj["pincode"] = answers.pincode;
 	answersObj["ageGroups"] = answers.ageGroups;
+	answersObj["status"] = "ACTIVE";
 
 	// insert/update data into collection
 	return context.services
