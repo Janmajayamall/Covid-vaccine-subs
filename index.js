@@ -1,6 +1,7 @@
 const venom = require("venom-bot");
 const axios = require("axios");
 const { MongoClient } = require("mongodb");
+const { performance } = require("perf_hooks");
 
 const showLogs = true;
 
@@ -8,7 +9,7 @@ const showLogs = true;
 const debug = false;
 
 // send notifications to subs by age group 18 | 45
-const ageGroups = [18];
+const ageGroups = [18, 45];
 
 // GOVERNMENT API FUNCTIONS
 function generateMessageForAgeGroup(centersInfo, ageGroup, pincode) {
@@ -36,8 +37,11 @@ function generateMessageForAgeGroup(centersInfo, ageGroup, pincode) {
 	}
 
 	if (centers.length === 0) {
-		return "";
+		return ["", false];
 	}
+
+	// good enough indicator
+	let goodEnough = false;
 
 	let generatedText = `*Vaccine availability for age group ${ageGroup}+ at PINCODE ${pincode}*\n\n`;
 	centers.forEach((center) => {
@@ -47,6 +51,11 @@ function generateMessageForAgeGroup(centersInfo, ageGroup, pincode) {
 				session.vaccine
 			} available for ${session.min_age_limit}+ on ${session.date}\n`;
 			centerText = centerText + text;
+
+			// checking good enough
+			if (session.available_capacity > 10) {
+				goodEnough = true;
+			}
 		});
 		generatedText = generatedText + centerText + "\n\n";
 	});
@@ -55,7 +64,7 @@ function generateMessageForAgeGroup(centersInfo, ageGroup, pincode) {
 	generatedText =
 		generatedText +
 		"*Book your slot* - https://selfregistration.cowin.gov.in\n\n *To reach out* -\nhttps://twitter.com/Janmajaya_mall\n\nhttps://www.instagram.com/ankeitamall/";
-	return generatedText;
+	return [generatedText, goodEnough];
 }
 
 async function getVaccineInfoByPincode(pincode, date) {
@@ -124,6 +133,54 @@ async function connectToMongoDB() {
 		);
 
 		return undefined;
+	}
+}
+
+async function addToJustUpdated(collection, pincode, ageGroup) {
+	try {
+		const res = await collection.insertOne({
+			value: `${pincode}-${ageGroup}`,
+			createdAt: new Date(Date.now()),
+		});
+
+		if (showLogs) {
+			`ADDED PINCODE ${pincode} & AGE GROUP ${ageGroup} TO justUpdated COLLECTION\n`;
+		}
+
+		return res;
+	} catch (e) {
+		printError(
+			`ERROR IN ADDING PINCODE ${pincode} & AGE GROUP ${ageGroup} TO justUpdated COLLECTION`
+		);
+		return undefined;
+	}
+}
+
+async function findInJustUpdated(collection, pincode, ageGroup) {
+	try {
+		const res = await collection.findOne({
+			value: `${pincode}-${ageGroup}`,
+		});
+
+		if (res == undefined) {
+			return false;
+		}
+
+		// stillGoodEnough is true
+		if (showLogs) {
+			printShortDivider();
+			console.log(
+				`SKIPPING SINCE PAST MESSAGES FOR PINCODE ${pincode} AND FOR AGE-GROUP ${ageGroup} ARE GOOD ENOUGH\n`
+			);
+			console.log(res);
+			printShortDivider();
+		}
+
+		return true;
+	} catch (e) {
+		printError(
+			`ERROR IN FINDING PINCODE ${pincode} & AGE GROUP ${ageGroup} IN justUpdated COLLECTION`
+		);
 	}
 }
 
@@ -207,6 +264,9 @@ async function initiateService(venomClient) {
 		return;
 	}
 	const entriesCollection = mongoConnection.db("subs").collection("entries");
+	const justUpdatedCollection = mongoConnection
+		.db("subs")
+		.collection("justUpdated");
 
 	// get distinct pincodes
 	const allPincodes = await getDistinctPincodes(entriesCollection);
@@ -252,6 +312,16 @@ async function initiateService(venomClient) {
 		for (let j = 0; j < ageGroups.length; j++) {
 			const ageGroup = ageGroups[j];
 
+			// check whether the pincode and ageGroup combination is good enough
+			const stillGoodEnough = await findInJustUpdated(
+				justUpdatedCollection,
+				pincode,
+				ageGroup
+			);
+			if (stillGoodEnough === true) {
+				continue;
+			}
+
 			if (showLogs) {
 				printShortDivider();
 				console.log(
@@ -260,7 +330,7 @@ async function initiateService(venomClient) {
 			}
 
 			// generate text for the age group according to pincode
-			const textMessage = generateMessageForAgeGroup(
+			const [textMessage, goodEnoughText] = generateMessageForAgeGroup(
 				centersInfo,
 				ageGroup,
 				pincode
@@ -333,6 +403,16 @@ async function initiateService(venomClient) {
 				}
 			}
 
+			// if text message was good enough, then add to justUpdated
+			if (goodEnoughText === true) {
+				// add to justUpdated
+				await addToJustUpdated(
+					justUpdatedCollection,
+					pincode,
+					ageGroup
+				);
+			}
+
 			if (showLogs) {
 				console.log(
 					`COMPLETED WORK ON AGE GROUP - ${ageGroup} for PINCODE - ${pincode}\n`
@@ -352,6 +432,7 @@ async function initiateService(venomClient) {
 
 	// closing mongodb connection
 	mongoConnection.close();
+
 	if (showLogs) {
 		printLine();
 		console.log(
@@ -364,10 +445,16 @@ async function initiateService(venomClient) {
 	return;
 }
 
-async function main(venomClient) {
+async function main() {
 	let runningCount = 0;
 
 	while (true) {
+		// creating venom client
+		const venomClient = await venom.create();
+
+		// starting time
+		let t0 = performance.now();
+
 		if (showLogs) {
 			printLine();
 			console.log(
@@ -385,30 +472,45 @@ async function main(venomClient) {
 
 		runningCount = runningCount + 1;
 
+		// end time
+		let t1 = performance.now();
+
+		// time took for the iteration
+		let iterationTime = (t1 - t0) / 1000;
+
 		if (showLogs) {
 			printDoubleSpace();
 			printLine();
 			console.log(
-				`COMPLETED MAIN SERVICE FOR AGE GROUPS ${ageGroups} - ${runningCount} TIMES \n`
+				`COMPLETED MAIN SERVICE FOR AGE GROUPS ${ageGroups}. TIME TAKEN BY ITERATION - ${iterationTime}. ITERATION COUNT - ${runningCount} \n`
 			);
 			printLine();
 		}
 
-		// sleep for 20 mins
-		await sleep(1200000);
+		// closing the venom client
+		venomClient.close();
+
+		// sleep for 5 mins
+		await sleep(300000);
 	}
 
 	return;
 }
 
-// STARTING VENOM
-venom
-	.create()
-	.then(async (client) => {
-		await main(client);
-	})
-	.catch((error) => {
-		console.log(error);
-	});
+main();
+
+// // STARTING VENOM
+// venom
+// 	.create()
+// 	.then(async (client) => {
+// 		try {
+// 			await main(client);
+// 		} catch (e) {
+// 			printError(e, "\n THIS ERROR WAS CAUGHT IN THE END\n");
+// 		}
+// 	})
+// 	.catch((error) => {
+// 		console.log(error);
+// 	});
 
 // https://cdn-api.co-vin.in/api/v2/appointment/sessions/public/calendarByPin
